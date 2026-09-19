@@ -1,19 +1,28 @@
-function! s:CheckNamingConflicts(commands) abort
-  for l:command in a:commands
-    if exists(':' . l:command) != 0
+function s:DoNamingConflictsExist() abort
+  let l:checks = [
+    \ ['XlsxCsv', 'command'],
+    \ ['g:xlsx_csv_', 'var'],
+  \ ]
+  for l:check in l:checks
+    let l:conflicts = getcompletion(l:check[0], l:check[1])
+    if !empty(l:conflicts)
       echoerr printf(
-            \ '[xlsx-csv-sheet-edit] Cannot load: :%s already exists',
-            \ l:command)
-      return 0
+        \ '[xlsx-csv-sheet-edit] Cannot load: namespace %s, %s already taken.
+        \ Check other plugins or your .vimrc',
+        \ l:check[0], l:check[1])
+      return 1
     endif
   endfor
 
-  return 1
+  return 0
 endfunction
 
-if !s:CheckNamingConflicts(['XlsxCsvOpenJson', 'XlsxCsvCopyTsv'])
+" execution
+
+if s:DoNamingConflictsExist()
   finish
 endif
 
-command -nargs=1 XlsxCsvOpenJson echo 'XlsxCsvOpenJson run OK!'
+
+command -nargs=1 XlsxCsvOpenJson call xlsx_csv#OpenJson(<q-args>)
 command -nargs=0 XlsxCsvCopyTsv echo 'XlsxCsvCopyTsv run OK!'
