@@ -1,13 +1,25 @@
 INTRODUCTION                                    *xlsx-csv-sheet-edit*
 
-Updated Dummy text
+A tool to work with Excel data in NeoVim (and Vim, but that's untested).
+
+Requirements:
+
+  - Miller (https://github.com/johnkerl/miller) at >= 6.21
+  - NeoVim compiled with the clipboard support
+
+Suggested workflow:
+
+  - export data as CSV
+  - open that CSV file via XlsxCsvOpenAsJson file.csv
+    that would open the file as JSON. If any columns have been selected in the
+    presented popup, they will be added on row 1 of each object entry in the
+    JSON file for convenience. It works good if the indent-based folding is setup.
+  - edit the JSON in NeoVim as normal text
+  - then copy to clipboard via XlsxCsvCopyAsCsv
+  - paste back to the Excel tool
 
 COMMANDS
 
-Dummy text 2
+:XlsxCsvOpenAsJson [file-name-csv]
 
-:XlsxCsvOpenJson [file-name].csv   some text for the XlsxOpenJson command
-                                some text for the XlsxOpenJson command
-
-:XlsxCsvCopyTsv                    some text for the XlsxCopyTsv command
-                                some text for the XlsxCopyTsv command
+:XlsxCsvCopyAsCsv
