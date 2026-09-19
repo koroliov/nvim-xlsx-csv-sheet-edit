@@ -60,5 +60,5 @@ if !s:CheckMillerVersion()
 endif
 
 
-command -nargs=1 XlsxCsvOpenJson call xlsx_csv#OpenJson(<q-args>)
+command -nargs=1 -complete=file XlsxCsvOpenJson call xlsx_csv#OpenJson(<q-args>)
 command -nargs=0 XlsxCsvCopyTsv echo 'XlsxCsvCopyTsv run OK!'
