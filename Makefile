@@ -13,3 +13,7 @@ help:
 .PHONY: nvim-helptags-generate
 nvim-helptags-generate:
 	nvim --headless -u NONE -c 'helptags doc' -c 'qa!'
+
+.PHONY: nvim-test-unit
+nvim-test-unit:
+	nvim --clean --headless -u NONE -S test/unit.vim
