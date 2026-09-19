@@ -1,22 +1,13 @@
-# nvim-xlsx-csv-sheet-edit
+INTRODUCTION                                    *xlsx-csv-sheet-edit*
 
-Nvim plugin to edit exported CSV data from Excel, then paste back via clipboard
+A tool to work with Excel data in NeoVim (and Vim, but that's untested).
 
-## Installation
-
-Install using your favorite package manager. E.g. with
-[lazy.nvim](https://github.com/folke/lazy.nvim) it would look like this:
-
-```
-   { 'koroliov/nvim-xlsx-csv-sheet-edit', lazy = false },
-```
-
-## Requirements:
+Requirements:
 
   - Miller (https://github.com/johnkerl/miller) at >= 6.21
   - NeoVim compiled with the clipboard support
 
-## Suggested workflow:
+Suggested workflow:
 
   - export data as CSV
   - open that CSV file via XlsxCsvOpenAsJson file.csv
@@ -26,3 +17,9 @@ Install using your favorite package manager. E.g. with
   - edit the JSON in NeoVim as normal text
   - then copy to clipboard via XlsxCsvCopyAsCsv
   - paste back to the Excel tool
+
+COMMANDS
+
+:XlsxCsvOpenAsJson [file-name-csv]
+
+:XlsxCsvCopyAsCsv
