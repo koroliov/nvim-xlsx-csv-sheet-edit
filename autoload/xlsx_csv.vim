@@ -4,6 +4,37 @@ function xlsx_csv#EchoError(msgText) abort
   echohl None
 endfunction
 
+function xlsx_csv#CopyAsTsv() abort
+  let l:json_lines = []
+  for l:line in getline(1, '$')
+    if l:line !~# '@@XlsxCsvMark@@'
+      call add(l:json_lines, l:line)
+    endif
+  endfor
+
+  let l:input_file = tempname()
+  try
+    if writefile(l:json_lines, l:input_file) != 0
+      call xlsx_csv#EchoError('Failed to prepare the current buffer for TSV conversion.')
+      return
+    endif
+
+    let l:csv_lines = systemlist([
+          \ 'mlr', '--ijson', '--otsv', 'cat', l:input_file])
+    if v:shell_error != 0
+      call xlsx_csv#EchoError(
+            \ 'Miller failed to convert the current buffer to TSV: '
+            \ . join(l:csv_lines, ' '))
+      return
+    endif
+
+    call setreg('+', join(l:csv_lines, "\n"))
+    echomsg '[xlsx-csv-sheet-edit] TSV copied to the system clipboard.'
+  finally
+    call delete(l:input_file)
+  endtry
+endfunction
+
 function xlsx_csv#CopyAsCsv() abort
   let l:json_lines = []
   for l:line in getline(1, '$')

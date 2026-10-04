@@ -24,5 +24,6 @@ Install using your favorite package manager. E.g. with
     presented popup, they will be added on row 1 of each object entry in the
     JSON file for convenience. It works good if the indent-based folding is setup.
   - edit the JSON in NeoVim as normal text
-  - then copy to clipboard via XlsxCsvCopyAsCsv
+  - then copy to clipboard via XlsxCsvCopyAsCsv or XlsxCsvCopyAsTsv
+    (CSV seems to work in LibreOffice Calc).
   - paste back to the Excel tool
