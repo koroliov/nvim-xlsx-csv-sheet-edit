@@ -13,7 +13,7 @@ Install using your favorite package manager. E.g. with
 
 ## Requirements:
 
-  - Miller (https://github.com/johnkerl/miller) at >= 6.21
+  - Miller (https://github.com/johnkerl/miller) at >= 6.13
   - NeoVim compiled with the clipboard support
 
 ## Suggested workflow:
