@@ -38,9 +38,9 @@ function s:CheckMillerVersion() abort
   let l:parts = split(l:version, '\.')
   let l:major = str2nr(l:parts[0])
   let l:minor = str2nr(l:parts[1])
-  if l:major < 6 || (l:major == 6 && l:minor < 21)
+  if l:major < 6 || (l:major == 6 && l:minor < 13)
     let l:msg = printf(
-      \ 'Failed to load: Miller %s is too old; version 6.21 or newer is required.',
+      \ 'Failed to load: Miller %s is too old; version 6.13 or newer is required.',
       \ l:version)
     call xlsx_csv#EchoError(msg)
     return 0
@@ -61,4 +61,5 @@ endif
 
 
 command -nargs=1 -complete=file XlsxCsvOpenAsJson call xlsx_csv#OpenAsJson(<q-args>)
-command -nargs=0 XlsxCopyAsCsv call xlsx_csv#CopyAsCsv()
+command -nargs=0 XlsxCopyAsCsv call xlsx_csv#CopyAsFormat('csv')
+command -nargs=0 XlsxCopyAsTsv call xlsx_csv#CopyAsFormat('tsv')
