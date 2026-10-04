@@ -4,7 +4,7 @@ function xlsx_csv#EchoError(msgText) abort
   echohl None
 endfunction
 
-function xlsx_csv#CopyAsTsv() abort
+function xlsx_csv#CopyAsFormat(format) abort
   let l:json_lines = []
   for l:line in getline(1, '$')
     if l:line !~# '@@XlsxCsvMark@@'
@@ -12,55 +12,28 @@ function xlsx_csv#CopyAsTsv() abort
     endif
   endfor
 
+  let l:format_uc = toupper(a:format)
   let l:input_file = tempname()
   try
     if writefile(l:json_lines, l:input_file) != 0
-      call xlsx_csv#EchoError('Failed to prepare the current buffer for TSV conversion.')
+      let l:msg = 'Failed to prepare the current buffer for ' .
+        \ format_uc . ' conversion.'
+      call xlsx_csv#EchoError()
       return
     endif
 
     let l:csv_lines = systemlist([
-          \ 'mlr', '--ijson', '--otsv', 'cat', l:input_file])
+          \ 'mlr', '--ijson', '--o' . a:format, 'cat', l:input_file])
     if v:shell_error != 0
       call xlsx_csv#EchoError(
-            \ 'Miller failed to convert the current buffer to TSV: '
-            \ . join(l:csv_lines, ' '))
+            \ 'Miller failed to convert the current buffer to ' . l:format_uc .
+            \ ': ' . join(l:csv_lines, ' '))
       return
     endif
 
     call setreg('+', join(l:csv_lines, "\n"))
-    echomsg '[xlsx-csv-sheet-edit] TSV copied to the system clipboard.'
-  finally
-    call delete(l:input_file)
-  endtry
-endfunction
-
-function xlsx_csv#CopyAsCsv() abort
-  let l:json_lines = []
-  for l:line in getline(1, '$')
-    if l:line !~# '@@XlsxCsvMark@@'
-      call add(l:json_lines, l:line)
-    endif
-  endfor
-
-  let l:input_file = tempname()
-  try
-    if writefile(l:json_lines, l:input_file) != 0
-      call xlsx_csv#EchoError('Failed to prepare the current buffer for CSV conversion.')
-      return
-    endif
-
-    let l:csv_lines = systemlist([
-          \ 'mlr', '--ijson', '--ocsv', 'cat', l:input_file])
-    if v:shell_error != 0
-      call xlsx_csv#EchoError(
-            \ 'Miller failed to convert the current buffer to CSV: '
-            \ . join(l:csv_lines, ' '))
-      return
-    endif
-
-    call setreg('+', join(l:csv_lines, "\n"))
-    echomsg '[xlsx-csv-sheet-edit] CSV copied to the system clipboard.'
+    echomsg '[xlsx-csv-sheet-edit] ' . format_uc .
+      \ ' copied to the system clipboard.'
   finally
     call delete(l:input_file)
   endtry

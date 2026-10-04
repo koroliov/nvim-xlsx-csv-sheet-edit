@@ -61,5 +61,5 @@ endif
 
 
 command -nargs=1 -complete=file XlsxCsvOpenAsJson call xlsx_csv#OpenAsJson(<q-args>)
-command -nargs=0 XlsxCopyAsCsv call xlsx_csv#CopyAsCsv()
-command -nargs=0 XlsxCopyAsTsv call xlsx_csv#CopyAsTsv()
+command -nargs=0 XlsxCopyAsCsv call xlsx_csv#CopyAsFormat('csv')
+command -nargs=0 XlsxCopyAsTsv call xlsx_csv#CopyAsFormat('tsv')
