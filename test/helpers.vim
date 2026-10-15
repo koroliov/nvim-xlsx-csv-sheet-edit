@@ -6,15 +6,29 @@ function! AssertJsonFilesEqual(actual_file, expected_file) abort
   call assert_equal(l:expected, l:actual)
 endfunction
 
+function! ReadSelectedColumns(fixture_dir, columns) abort
+  let l:file = a:fixture_dir . '/selected-columns.json'
+  let l:selected_columns = json_decode(join(readfile(l:file), "\n"))
+
+  call assert_equal(type([]), type(l:selected_columns))
+  for l:column in l:selected_columns
+    call assert_true(index(a:columns, l:column) >= 0,
+          \ 'Unknown selected column: ' . l:column)
+  endfor
+
+  return l:selected_columns
+endfunction
+
 function! CreateCsvDotJsonFileTest(case_name) abort
   let l:fixture_dir = s:test_dir . '/fixtures/open-as-json/' . a:case_name
   let l:output_file = tempname() . '.json'
 
   try
+    let l:Selector = function('ReadSelectedColumns', [l:fixture_dir])
     let l:error_msg = xlsx_csv#CreateCsvDotJsonFile(
           \ l:fixture_dir . '/input.csv',
           \ l:output_file,
-          \ [])
+          \ l:Selector)
     call assert_equal('', l:error_msg)
     if empty(l:error_msg)
       call AssertJsonFilesEqual(

@@ -37,7 +37,7 @@ function xlsx_csv#CopyAsFormat(format) abort
   endtry
 endfunction
 
-function s:SelectMarkColumns(columns) abort
+function s:SelectColumns(columns) abort
   let l:selected = repeat([0], len(a:columns))
   let l:buffer = nvim_create_buf(v:false, v:true)
   let l:desired_width = 0
@@ -113,7 +113,7 @@ function s:SelectMarkColumns(columns) abort
   let l:result = []
   for l:index in range(0, len(a:columns) - 1)
     if l:selected[l:index]
-      call add(l:result, l:index)
+      call add(l:result, a:columns[l:index])
     endif
   endfor
   return l:result
@@ -175,7 +175,7 @@ function xlsx_csv#ConvertToJson(input_file, output_file) abort
   endtry
 endfunction
 
-function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, ...) abort
+function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
   let l:error_msg = xlsx_csv#ConvertToJson(a:input_file, a:output_file)
   if !empty(l:error_msg)
     return l:error_msg
@@ -194,12 +194,20 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, ...) abort
     return 'Expected JSON objects in the file: ' . a:output_file
   else
     let l:columns = s:GetJsonColumns(l:json_lines, l:objects[0])
-    if a:0
-      let l:selected_columns = a:1
-    else
-      let l:selected_columns = s:SelectMarkColumns(l:columns)
-    endif
   endif
+
+  let l:selected_columns = call(a:selector, [l:columns])
+  if type(l:selected_columns) != type([])
+    return 'Column selector must return a list of column names.'
+  endif
+
+  for l:column in l:selected_columns
+    if index(l:columns, l:column) < 0
+      return 'Column selector returned an unknown column: ' . l:column
+    endif
+  endfor
+
+  " Apply changes based on l:selected_columns here.
 
   if writefile(l:json_lines, a:output_file) != 0
     return 'Failed to write the JSON file: ' . a:output_file
@@ -210,7 +218,10 @@ endfunction
 
 function xlsx_csv#OpenAsJson(file) abort
   let l:output_file = a:file . '.json'
-  let l:error_msg = xlsx_csv#CreateCsvDotJsonFile(a:file, l:output_file)
+  let l:error_msg = xlsx_csv#CreateCsvDotJsonFile(
+        \ a:file,
+        \ l:output_file,
+        \ function('s:SelectColumns'))
   if !empty(l:error_msg)
     call xlsx_csv#EchoError(l:error_msg)
     return
