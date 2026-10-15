@@ -175,30 +175,45 @@ function xlsx_csv#ConvertToJson(input_file, output_file) abort
   endtry
 endfunction
 
-function xlsx_csv#OpenAsJson(file) abort
-  let l:output_file = a:file . '.json'
-  let l:errorMsg = xlsx_csv#ConvertToJson(a:file, l:output_file)
-  if !empty(l:errorMsg)
-    call xlsx_csv#EchoError(l:errorMsg)
-    return
+function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, ...) abort
+  let l:error_msg = xlsx_csv#ConvertToJson(a:input_file, a:output_file)
+  if !empty(l:error_msg)
+    return l:error_msg
   endif
 
-  let l:json_lines = readfile(l:output_file)
+  let l:json_lines = readfile(a:output_file)
   try
     let l:objects = json_decode(join(l:json_lines, "\n"))
   catch
-    call xlsx_csv#EchoError('Failed to parse the JSON file: ' . l:output_file)
-    return
+    return 'Failed to parse the JSON file: ' . a:output_file
   endtry
 
   if type(l:objects) != type([]) || empty(l:objects)
     let l:columns = []
   elseif type(l:objects[0]) != type({})
-    call xlsx_csv#EchoError('Expected JSON objects in the file: ' . l:output_file)
-    return
+    return 'Expected JSON objects in the file: ' . a:output_file
   else
     let l:columns = s:GetJsonColumns(l:json_lines, l:objects[0])
-    call s:SelectMarkColumns(l:columns)
+    if a:0
+      let l:selected_columns = a:1
+    else
+      let l:selected_columns = s:SelectMarkColumns(l:columns)
+    endif
+  endif
+
+  if writefile(l:json_lines, a:output_file) != 0
+    return 'Failed to write the JSON file: ' . a:output_file
+  endif
+
+  return ''
+endfunction
+
+function xlsx_csv#OpenAsJson(file) abort
+  let l:output_file = a:file . '.json'
+  let l:error_msg = xlsx_csv#CreateCsvDotJsonFile(a:file, l:output_file)
+  if !empty(l:error_msg)
+    call xlsx_csv#EchoError(l:error_msg)
+    return
   endif
 
   try
