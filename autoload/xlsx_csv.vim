@@ -37,16 +37,32 @@ function xlsx_csv#CopyAsFormat(format) abort
   endtry
 endfunction
 
+function s:CompareColumnRanks(left, right) abort
+  let l:left_rank = str2nr(a:left[0])
+  let l:right_rank = str2nr(a:right[0])
+  if l:left_rank != l:right_rank
+    return l:left_rank < l:right_rank ? -1 : 1
+  endif
+
+  " Keep the input order when two columns have the same rank.
+  return a:left[1] - a:right[1]
+endfunction
+
 function s:SelectColumns(columns) abort
-  let l:selected = repeat([0], len(a:columns))
+  " An empty string means that a column is not selected.  Otherwise the
+  " value is a string containing only non-negative integer digits.
+  let l:order = repeat([''], len(a:columns))
   let l:buffer = nvim_create_buf(v:false, v:true)
   let l:desired_width = 0
 
   for l:column in a:columns
     let l:desired_width = max([l:desired_width, strdisplaywidth(l:column)])
   endfor
+  let l:desired_width = max([l:desired_width,
+        \ strdisplaywidth('Select and order columns'),
+        \ strdisplaywidth('Up/Down: move  0-9: enter rank  BS: delete  Space/c: clear  Enter: accept  q/Esc: cancel')])
 
-  let l:width = min([max([20, l:desired_width + 10]), &columns - 4])
+  let l:width = min([max([20, l:desired_width + 14]), &columns - 4])
   let l:height = min([len(a:columns) + 3, &lines - 4])
   let l:visible_items = max([1, l:height - 3])
   let l:window = nvim_open_win(l:buffer, v:true, {
@@ -60,7 +76,8 @@ function s:SelectColumns(columns) abort
         \ })
   call nvim_buf_set_option(l:buffer, 'buftype', 'nofile')
   call nvim_buf_set_option(l:buffer, 'bufhidden', 'wipe')
-  call nvim_win_set_option(l:window, 'wrap', v:false)
+  call nvim_win_set_option(l:window, 'wrap', v:true)
+  call nvim_win_set_option(l:window, 'linebreak', v:true)
 
   let l:namespace = nvim_create_namespace('xlsx_csv_select_mark_columns')
   let l:current = 0
@@ -68,14 +85,14 @@ function s:SelectColumns(columns) abort
 
   while 1
     let l:menu = [
-          \ 'Select columns to mark',
+          \ 'Select and order columns',
           \ '']
     for l:index in range(l:offset, min([len(a:columns) - 1, l:offset + l:visible_items - 1]))
-      let l:mark = l:selected[l:index] ? '*' : ' '
+      let l:rank = empty(l:order[l:index]) ? ' ' : l:order[l:index]
       let l:prefix = l:index == l:current ? '> ' : '  '
-      call add(l:menu, printf('%s[%s] %2d. %s', l:prefix, l:mark, l:index + 1, a:columns[l:index]))
+      call add(l:menu, printf('%s[%3s] %2d. %s', l:prefix, l:rank, l:index + 1, a:columns[l:index]))
     endfor
-    call extend(l:menu, ['', 'Up/Down: move  Space: toggle  Enter: accept  q/Esc: cancel'])
+    call extend(l:menu, ['', 'Up/Down: move  0-9: enter rank  BS: delete  Space/c: clear  Enter: accept  q/Esc: cancel'])
 
     call nvim_buf_set_option(l:buffer, 'modifiable', v:true)
     call nvim_buf_set_lines(l:buffer, 0, -1, v:true, l:menu)
@@ -89,12 +106,18 @@ function s:SelectColumns(columns) abort
       let l:current = max([0, l:current - 1])
     elseif l:key ==# "\<Down>" || l:key ==# 'j'
       let l:current = min([len(a:columns) - 1, l:current + 1])
-    elseif l:key ==# ' '
-      let l:selected[l:current] = !l:selected[l:current]
+    elseif l:key =~# '^[0-9]$'
+      let l:order[l:current] .= l:key
+    elseif l:key ==# "\<BS>" || l:key ==# "\<C-H>"
+      if !empty(l:order[l:current])
+        let l:order[l:current] = strpart(l:order[l:current], 0, strlen(l:order[l:current]) - 1)
+      endif
+    elseif l:key ==# ' ' || l:key ==# 'c'
+      let l:order[l:current] = ''
     elseif l:key ==# "\<CR>"
       break
     elseif l:key ==# "\<Esc>" || l:key ==# 'q'
-      let l:selected = []
+      let l:order = []
       break
     endif
 
@@ -110,11 +133,17 @@ function s:SelectColumns(columns) abort
     call nvim_buf_delete(l:buffer, {'force': v:true})
   endif
 
-  let l:result = []
-  for l:index in range(0, len(a:columns) - 1)
-    if l:selected[l:index]
-      call add(l:result, a:columns[l:index])
+  let l:ranked = []
+  for l:index in range(0, len(l:order) - 1)
+    if !empty(l:order[l:index])
+      call add(l:ranked, [l:order[l:index], l:index])
     endif
+  endfor
+  call sort(l:ranked, function('s:CompareColumnRanks'))
+
+  let l:result = []
+  for l:item in l:ranked
+    call add(l:result, a:columns[l:item[1]])
   endfor
   return l:result
 endfunction
