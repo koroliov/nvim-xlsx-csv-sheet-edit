@@ -205,30 +205,42 @@ function s:AddMarkRows(file, columns, selected_columns) abort
   return 1
 endfunction
 
-function xlsx_csv#OpenAsJson(file) abort
-  if !filereadable(a:file)
-    call xlsx_csv#EchoError('Failed to open the file: ' . a:file)
-    return
+function xlsx_csv#ConvertToJson(input_file, output_file) abort
+  if !filereadable(a:input_file)
+    return 'Failed to open the file: ' . a:input_file
   endif
 
-  let l:output_file = a:file . '.json'
   let l:error_file = tempname()
-  let l:command = 'mlr --icsv --ojson cat ' . shellescape(a:file)
-        \ . ' > ' . shellescape(l:output_file)
+  let l:command = 'mlr --icsv --ojson cat ' . shellescape(a:input_file)
+        \ . ' > ' . shellescape(a:output_file)
         \ . ' 2> ' . shellescape(l:error_file)
-  call system(l:command)
-  let l:exit_code = v:shell_error
-  let l:error_lines = filereadable(l:error_file)
-        \ ? readfile(l:error_file)
-        \ : []
-  call delete(l:error_file)
 
-  if l:exit_code != 0
-    let l:details = join(l:error_lines, ' ')
-    if empty(l:details)
-      let l:details = 'Miller exited with status ' . l:exit_code
+  try
+    call system(l:command)
+    let l:exit_code = v:shell_error
+    let l:error_lines = filereadable(l:error_file)
+          \ ? readfile(l:error_file)
+          \ : []
+
+    if l:exit_code != 0
+      let l:details = join(l:error_lines, ' ')
+      if empty(l:details)
+        let l:details = 'Miller exited with status ' . l:exit_code
+      endif
+      return 'Miller failed for ' . a:input_file . ': ' . l:details
     endif
-    call xlsx_csv#EchoError('Miller failed for ' . a:file . ': ' . l:details)
+
+    return ''
+  finally
+    call delete(l:error_file)
+  endtry
+endfunction
+
+function xlsx_csv#OpenAsJson(file) abort
+  let l:output_file = a:file . '.json'
+  let l:errorMsg = xlsx_csv#ConvertToJson(a:file, l:output_file)
+  if !empty(l:errorMsg)
+    call xlsx_csv#EchoError(l:errorMsg)
     return
   endif
 
