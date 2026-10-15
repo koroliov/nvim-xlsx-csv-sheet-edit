@@ -7,9 +7,7 @@ endfunction
 function xlsx_csv#CopyAsFormat(format) abort
   let l:json_lines = []
   for l:line in getline(1, '$')
-    if l:line !~# '@@XlsxCsvMark@@'
-      call add(l:json_lines, l:line)
-    endif
+    call add(l:json_lines, l:line)
   endfor
 
   let l:format_uc = toupper(a:format)
@@ -146,65 +144,6 @@ function s:GetJsonColumns(lines, object) abort
   return empty(l:columns) ? keys(a:object) : l:columns
 endfunction
 
-function s:AddMarkRows(file, columns, selected_columns) abort
-  let l:lines = readfile(a:file)
-
-  try
-    let l:objects = json_decode(join(l:lines, "\n"))
-  catch
-    call xlsx_csv#EchoError('Failed to parse the JSON file: ' . a:file)
-    return 0
-  endtry
-
-  if type(l:objects) != type([])
-    call xlsx_csv#EchoError('Expected a JSON array in the file: ' . a:file)
-    return 0
-  endif
-
-  if empty(l:objects)
-    return 1
-  endif
-
-  if type(l:objects[0]) != type({})
-    call xlsx_csv#EchoError('Expected JSON objects in the file: ' . a:file)
-    return 0
-  endif
-
-  let l:output_lines = []
-  let l:row_number = 0
-
-  for l:line in l:lines
-    call add(l:output_lines, l:line)
-    if l:line =~# '^\s*{\s*$'
-      if l:row_number >= len(l:objects)
-        call xlsx_csv#EchoError('Could not match JSON objects in the file: ' . a:file)
-        return 0
-      endif
-
-      let l:mark = [l:row_number + 1]
-      for l:column_index in a:selected_columns
-        call add(l:mark, get(l:objects[l:row_number], a:columns[l:column_index], v:null))
-      endfor
-
-      let l:indent = matchstr(l:line, '^\s*') . '  '
-      call add(l:output_lines, l:indent . '"@@XlsxCsvMark@@": ' . json_encode(l:mark) . ',')
-      let l:row_number += 1
-    endif
-  endfor
-
-  if l:row_number != len(l:objects)
-    call xlsx_csv#EchoError('Could not locate all JSON objects in the file: ' . a:file)
-    return 0
-  endif
-
-  if writefile(l:output_lines, a:file) != 0
-    call xlsx_csv#EchoError('Failed to write the JSON file: ' . a:file)
-    return 0
-  endif
-
-  return 1
-endfunction
-
 function xlsx_csv#ConvertToJson(input_file, output_file) abort
   if !filereadable(a:input_file)
     return 'Failed to open the file: ' . a:input_file
@@ -253,17 +192,13 @@ function xlsx_csv#OpenAsJson(file) abort
   endtry
 
   if type(l:objects) != type([]) || empty(l:objects)
-    let l:selected_columns = []
+    let l:columns = []
   elseif type(l:objects[0]) != type({})
     call xlsx_csv#EchoError('Expected JSON objects in the file: ' . l:output_file)
     return
   else
     let l:columns = s:GetJsonColumns(l:json_lines, l:objects[0])
-    let l:selected_columns = s:SelectMarkColumns(l:columns)
-  endif
-
-  if !empty(l:selected_columns) && !s:AddMarkRows(l:output_file, l:columns, l:selected_columns)
-    return
+    call s:SelectMarkColumns(l:columns)
   endif
 
   try
