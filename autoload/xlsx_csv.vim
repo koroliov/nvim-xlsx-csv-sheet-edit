@@ -204,6 +204,36 @@ function xlsx_csv#ConvertToJson(input_file, output_file) abort
   endtry
 endfunction
 
+function s:ScalarText(value) abort
+  if type(a:value) == type('')
+    return a:value
+  endif
+  return printf('%s', a:value)
+endfunction
+
+function s:EncodeObjects(objects, column_orders) abort
+  let l:lines = ['[']
+
+  for l:object_index in range(0, len(a:objects) - 1)
+    let l:columns = a:column_orders[l:object_index]
+    call add(l:lines, '  {')
+    for l:column_index in range(0, len(l:columns) - 1)
+      let l:column = l:columns[l:column_index]
+      let l:value = has_key(a:objects[l:object_index], l:column)
+            \ ? a:objects[l:object_index][l:column]
+            \ : ''
+      let l:comma = l:column_index == len(l:columns) - 1 ? '' : ','
+      call add(l:lines, printf('    %s: %s%s', json_encode(l:column),
+            \ json_encode(l:value), l:comma))
+    endfor
+    let l:object_comma = l:object_index == len(a:objects) - 1 ? '' : ','
+    call add(l:lines, '  }' . l:object_comma)
+  endfor
+
+  call add(l:lines, ']')
+  return l:lines
+endfunction
+
 function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
   let l:error_msg = xlsx_csv#ConvertToJson(a:input_file, a:output_file)
   if !empty(l:error_msg)
@@ -236,7 +266,45 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
     endif
   endfor
 
-  " Apply changes based on l:selected_columns here.
+  let l:metadata = {}
+  for l:column in l:columns
+    let l:first_value = has_key(l:objects[0], l:column)
+          \ ? s:ScalarText(l:objects[0][l:column])
+          \ : ''
+    let l:same_value = v:true
+
+    for l:object in l:objects[1:]
+      let l:value = has_key(l:object, l:column)
+            \ ? s:ScalarText(l:object[l:column])
+            \ : ''
+      if l:value !=# l:first_value
+        let l:same_value = v:false
+        break
+      endif
+    endfor
+
+    if index(l:selected_columns, l:column) >= 0
+      let l:metadata[l:column] = v:false
+    elseif l:same_value
+      let l:metadata[l:column] = l:first_value
+    else
+      return 'Column is not selected and contains different values: ' . l:column
+    endif
+  endfor
+
+  let l:output_objects = [l:metadata]
+  let l:column_orders = [l:columns]
+  for l:object in l:objects
+    let l:selected_object = {}
+    for l:column in l:selected_columns
+      let l:selected_object[l:column] = has_key(l:object, l:column)
+            \ ? l:object[l:column]
+            \ : ''
+    endfor
+    call add(l:output_objects, l:selected_object)
+    call add(l:column_orders, l:selected_columns)
+  endfor
+  let l:json_lines = s:EncodeObjects(l:output_objects, l:column_orders)
 
   if writefile(l:json_lines, a:output_file) != 0
     return 'Failed to write the JSON file: ' . a:output_file
