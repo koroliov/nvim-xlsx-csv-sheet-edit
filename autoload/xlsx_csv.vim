@@ -5,33 +5,83 @@ function xlsx_csv#EchoError(msgText) abort
 endfunction
 
 function xlsx_csv#CopyAsFormat(format) abort
-  let l:json_lines = []
-  for l:line in getline(1, '$')
-    call add(l:json_lines, l:line)
+  let l:result = xlsx_csv#ConvertJsonToFormat(
+        \ getline(1, '$'), a:format)
+  if !empty(l:result.error)
+    call xlsx_csv#EchoError(l:result.error)
+    return
+  endif
+
+  call setreg('+', join(l:result.lines, "\n"))
+  echomsg '[xlsx-csv-sheet-edit] ' . toupper(a:format) .
+        \ ' copied to the system clipboard.'
+endfunction
+
+function xlsx_csv#ConvertJsonToFormat(json_lines, format) abort
+  if a:format !~# '^\%(csv\|tsv\)$'
+    return {'error': 'Unsupported output format: ' . a:format, 'lines': []}
+  endif
+
+  try
+    let l:objects = json_decode(join(a:json_lines, "\n"))
+  catch
+    return {'error': 'Failed to parse JSON input.', 'lines': []}
+  endtry
+
+  if type(l:objects) != type([]) || empty(l:objects)
+    return {'error': 'Expected a non-empty JSON array.', 'lines': []}
+  endif
+  if type(l:objects[0]) != type({})
+    return {'error': 'Expected the first JSON array entry to be an object.',
+          \ 'lines': []}
+  endif
+
+  let l:columns = s:GetJsonColumns(a:json_lines, l:objects[0])
+  if empty(l:columns)
+    let l:columns = keys(l:objects[0])
+  endif
+
+  let l:normalized = []
+  for l:object_index in range(1, len(l:objects) - 1)
+    let l:object = l:objects[l:object_index]
+    if type(l:object) != type({})
+      return {'error': printf('JSON entry %d is not an object.',
+            \ l:object_index), 'lines': []}
+    endif
+
+    for l:field in keys(l:object)
+      if index(l:columns, l:field) < 0
+        return {'error': printf(
+              \ 'JSON entry %d contains an unknown field: %s',
+              \ l:object_index, l:field), 'lines': []}
+      endif
+    endfor
+
+    let l:normalized_object = {}
+    for l:column in l:columns
+      let l:normalized_object[l:column] = has_key(l:object, l:column)
+            \ ? l:object[l:column]
+            \ : l:objects[0][l:column]
+    endfor
+    call add(l:normalized, l:normalized_object)
   endfor
 
-  let l:format_uc = toupper(a:format)
+  let l:json_lines = s:EncodeObjects(
+        \ l:normalized, repeat([l:columns], len(l:normalized)))
   let l:input_file = tempname()
   try
     if writefile(l:json_lines, l:input_file) != 0
-      let l:msg = 'Failed to prepare the current buffer for ' .
-        \ format_uc . ' conversion.'
-      call xlsx_csv#EchoError()
-      return
+      return {'error': 'Failed to prepare JSON for conversion.', 'lines': []}
     endif
 
-    let l:csv_lines = systemlist([
+    let l:format_lines = systemlist([
           \ 'mlr', '--ijson', '--o' . a:format, 'cat', l:input_file])
     if v:shell_error != 0
-      call xlsx_csv#EchoError(
-            \ 'Miller failed to convert the current buffer to ' . l:format_uc .
-            \ ': ' . join(l:csv_lines, ' '))
-      return
+      return {'error': 'Miller failed to convert JSON to ' . toupper(a:format)
+            \ . ': ' . join(l:format_lines, ' '), 'lines': []}
     endif
 
-    call setreg('+', join(l:csv_lines, "\n"))
-    echomsg '[xlsx-csv-sheet-edit] ' . format_uc .
-      \ ' copied to the system clipboard.'
+    return {'error': '', 'lines': l:format_lines}
   finally
     call delete(l:input_file)
   endtry
