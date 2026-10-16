@@ -52,6 +52,13 @@ function s:SelectColumns(columns) abort
   " An empty string means that a column is not selected.  Otherwise the
   " value is a string containing only non-negative integer digits.
   let l:order = repeat([''], len(a:columns))
+  for l:index in range(0, len(a:columns) - 1)
+    let l:column = a:columns[l:index]
+    if has_key(s:, 'select_column_defaults')
+          \ && has_key(s:select_column_defaults, l:column)
+      let l:order[l:index] = s:select_column_defaults[l:column]
+    endif
+  endfor
   let l:buffer = nvim_create_buf(v:false, v:true)
   let l:desired_width = 0
 
@@ -211,6 +218,25 @@ function s:ScalarText(value) abort
   return printf('%s', a:value)
 endfunction
 
+function s:NeedsColumnSelection(objects, column) abort
+  let l:first_value = has_key(a:objects[0], a:column)
+        \ ? s:ScalarText(a:objects[0][a:column])
+        \ : ''
+  let l:has_non_empty_value = !empty(l:first_value)
+
+  for l:object in a:objects[1:]
+    let l:value = has_key(l:object, a:column)
+          \ ? s:ScalarText(l:object[a:column])
+          \ : ''
+    let l:has_non_empty_value = l:has_non_empty_value || !empty(l:value)
+    if l:value !=# l:first_value && l:has_non_empty_value
+      return v:true
+    endif
+  endfor
+
+  return v:false
+endfunction
+
 function s:EncodeObjects(objects, column_orders) abort
   let l:lines = ['[']
 
@@ -255,7 +281,24 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
     let l:columns = s:GetJsonColumns(l:json_lines, l:objects[0])
   endif
 
-  let l:selected_columns = call(a:selector, [l:columns])
+  let l:defaults = {}
+  if !empty(l:objects)
+    for l:index in range(0, len(l:columns) - 1)
+      if s:NeedsColumnSelection(l:objects, l:columns[l:index])
+        " Use the human-facing column number as the initial rank.
+        let l:defaults[l:columns[l:index]] = string(l:index + 1)
+      endif
+    endfor
+  endif
+
+  " Keep the selector API unchanged while passing defaults to the built-in
+  " selector through script-local context.
+  let s:select_column_defaults = l:defaults
+  try
+    let l:selected_columns = call(a:selector, [l:columns])
+  finally
+    unlet! s:select_column_defaults
+  endtry
   if type(l:selected_columns) != type([])
     return 'Column selector must return a list of column names.'
   endif
