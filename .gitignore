@@ -1,2 +1,2 @@
-*.csv.json
+/test/fixtures/open-as-json/**/*.csv.json
 nvim.log

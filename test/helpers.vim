@@ -6,6 +6,12 @@ function! AssertJsonFilesEqual(actual_file, expected_file) abort
   call assert_equal(l:expected, l:actual)
 endfunction
 
+function! AssertTextFilesEqual(actual_file, expected_file) abort
+  call assert_equal(
+        \ readfile(a:expected_file),
+        \ readfile(a:actual_file))
+endfunction
+
 function! ReadSelectedColumns(fixture_dir, columns) abort
   let l:file = a:fixture_dir . '/selected-columns.json'
   let l:selected_columns = json_decode(join(readfile(l:file), "\n"))
@@ -17,6 +23,24 @@ function! ReadSelectedColumns(fixture_dir, columns) abort
   endfor
 
   return l:selected_columns
+endfunction
+
+function! ConvertJsonToFormatTest(case_name, format) abort
+  let l:fixture_dir = s:test_dir . '/fixtures/copy-as-' . a:format . '/' . a:case_name
+  let l:input_lines = readfile(l:fixture_dir . '/input.csv.json')
+  let l:expected_file = l:fixture_dir . '/expected.' . a:format
+
+  let l:result = xlsx_csv#ConvertJsonToFormat(l:input_lines, a:format)
+  call assert_equal('', l:result.error)
+  if empty(l:result.error)
+    let l:actual_file = tempname()
+    try
+      call writefile(l:result.lines, l:actual_file)
+      call AssertTextFilesEqual(l:actual_file, l:expected_file)
+    finally
+      call delete(l:actual_file)
+    endtry
+  endif
 endfunction
 
 function! CreateCsvDotJsonFileTest(case_name) abort
