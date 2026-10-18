@@ -45,6 +45,152 @@ function xlsx_csv#ConvertJsonToFormat(json_lines, format) abort
         \ a:format)
 endfunction
 
+function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
+  let l:error_msg = xlsx_csv#ConvertToJson(a:input_file, a:output_file)
+  if !empty(l:error_msg)
+    return l:error_msg
+  endif
+
+  let l:json_lines = readfile(a:output_file)
+  try
+    let l:objects = json_decode(join(l:json_lines, "\n"))
+  catch
+    return 'Failed to parse the JSON file: ' . a:output_file
+  endtry
+
+  if type(l:objects) != type([]) || empty(l:objects)
+    let l:columns = []
+  elseif type(l:objects[0]) != type({})
+    return 'Expected JSON objects in the file: ' . a:output_file
+  else
+    let l:columns = s:GetJsonColumns(l:json_lines, l:objects[0])
+  endif
+
+  let l:defaults = {}
+  if !empty(l:objects)
+    for l:index in range(0, len(l:columns) - 1)
+      if s:NeedsColumnSelection(l:objects, l:columns[l:index])
+        " Use the human-facing column number as the initial rank.
+        let l:defaults[l:columns[l:index]] = string(l:index + 1)
+      endif
+    endfor
+  endif
+
+  " Keep the selector API unchanged while passing defaults to the built-in
+  " selector through script-local context.
+  let s:select_column_defaults = l:defaults
+  try
+    let l:selected_columns = call(a:selector, [l:columns])
+  finally
+    unlet! s:select_column_defaults
+  endtry
+  if type(l:selected_columns) != type([])
+    return 'Column selector must return a list of column names.'
+  endif
+
+  for l:column in l:selected_columns
+    if index(l:columns, l:column) < 0
+      return 'Column selector returned an unknown column: ' . l:column
+    endif
+  endfor
+
+  let l:metadata = {}
+  for l:column in l:columns
+    let l:first_value = has_key(l:objects[0], l:column)
+          \ ? s:ScalarText(l:objects[0][l:column])
+          \ : ''
+    let l:same_value = v:true
+
+    for l:object in l:objects[1:]
+      let l:value = has_key(l:object, l:column)
+            \ ? s:ScalarText(l:object[l:column])
+            \ : ''
+      if l:value !=# l:first_value
+        let l:same_value = v:false
+        break
+      endif
+    endfor
+
+    if index(l:selected_columns, l:column) >= 0
+      let l:metadata[l:column] = v:false
+    elseif l:same_value
+      let l:metadata[l:column] = l:first_value
+    else
+      return 'Column is not selected and contains different values: ' . l:column
+    endif
+  endfor
+
+  let l:output_objects = [l:metadata]
+  let l:column_orders = [l:columns]
+  for l:object in l:objects
+    let l:selected_object = {}
+    for l:column in l:selected_columns
+      let l:selected_object[l:column] = has_key(l:object, l:column)
+            \ ? l:object[l:column]
+            \ : ''
+    endfor
+    call add(l:output_objects, l:selected_object)
+    call add(l:column_orders, l:selected_columns)
+  endfor
+  let l:json_lines = s:EncodeObjects(l:output_objects, l:column_orders)
+
+  if writefile(l:json_lines, a:output_file) != 0
+    return 'Failed to write the JSON file: ' . a:output_file
+  endif
+
+  return ''
+endfunction
+
+function xlsx_csv#OpenAsJson(file) abort
+  let l:output_file = a:file . '.json'
+  let l:error_msg = xlsx_csv#CreateCsvDotJsonFile(
+        \ a:file,
+        \ l:output_file,
+        \ function('s:SelectColumns'))
+  if !empty(l:error_msg)
+    call xlsx_csv#EchoError(l:error_msg)
+    return
+  endif
+
+  try
+    execute 'edit ' . fnameescape(l:output_file)
+  catch
+    call xlsx_csv#EchoError('Failed to open the file: ' . l:output_file)
+  endtry
+endfunction
+
+function xlsx_csv#ConvertToJson(input_file, output_file) abort
+  if !filereadable(a:input_file)
+    return 'Failed to open the file: ' . a:input_file
+  endif
+
+  let l:error_file = tempname()
+  let l:command = 'mlr --icsv --ojson cat ' . shellescape(a:input_file)
+        \ . ' > ' . shellescape(a:output_file)
+        \ . ' 2> ' . shellescape(l:error_file)
+
+  try
+    call system(l:command)
+    let l:exit_code = v:shell_error
+    let l:error_lines = filereadable(l:error_file)
+          \ ? readfile(l:error_file)
+          \ : []
+
+    if l:exit_code != 0
+      let l:details = join(l:error_lines, ' ')
+      if empty(l:details)
+        let l:details = 'Miller exited with status ' . l:exit_code
+      endif
+      return 'Miller failed for ' . a:input_file . ': ' . l:details
+    endif
+
+    return ''
+  finally
+    call delete(l:error_file)
+  endtry
+endfunction
+
+"local functions
 function s:ParseJsonArray(lines) abort
   try
     let l:objects = json_decode(join(a:lines, "\n"))
@@ -270,37 +416,6 @@ function s:GetJsonColumns(lines, object) abort
   return empty(l:columns) ? keys(a:object) : l:columns
 endfunction
 
-function xlsx_csv#ConvertToJson(input_file, output_file) abort
-  if !filereadable(a:input_file)
-    return 'Failed to open the file: ' . a:input_file
-  endif
-
-  let l:error_file = tempname()
-  let l:command = 'mlr --icsv --ojson cat ' . shellescape(a:input_file)
-        \ . ' > ' . shellescape(a:output_file)
-        \ . ' 2> ' . shellescape(l:error_file)
-
-  try
-    call system(l:command)
-    let l:exit_code = v:shell_error
-    let l:error_lines = filereadable(l:error_file)
-          \ ? readfile(l:error_file)
-          \ : []
-
-    if l:exit_code != 0
-      let l:details = join(l:error_lines, ' ')
-      if empty(l:details)
-        let l:details = 'Miller exited with status ' . l:exit_code
-      endif
-      return 'Miller failed for ' . a:input_file . ': ' . l:details
-    endif
-
-    return ''
-  finally
-    call delete(l:error_file)
-  endtry
-endfunction
-
 function s:ScalarText(value) abort
   if type(a:value) == type('')
     return a:value
@@ -348,118 +463,4 @@ function s:EncodeObjects(objects, column_orders) abort
 
   call add(l:lines, ']')
   return l:lines
-endfunction
-
-function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
-  let l:error_msg = xlsx_csv#ConvertToJson(a:input_file, a:output_file)
-  if !empty(l:error_msg)
-    return l:error_msg
-  endif
-
-  let l:json_lines = readfile(a:output_file)
-  try
-    let l:objects = json_decode(join(l:json_lines, "\n"))
-  catch
-    return 'Failed to parse the JSON file: ' . a:output_file
-  endtry
-
-  if type(l:objects) != type([]) || empty(l:objects)
-    let l:columns = []
-  elseif type(l:objects[0]) != type({})
-    return 'Expected JSON objects in the file: ' . a:output_file
-  else
-    let l:columns = s:GetJsonColumns(l:json_lines, l:objects[0])
-  endif
-
-  let l:defaults = {}
-  if !empty(l:objects)
-    for l:index in range(0, len(l:columns) - 1)
-      if s:NeedsColumnSelection(l:objects, l:columns[l:index])
-        " Use the human-facing column number as the initial rank.
-        let l:defaults[l:columns[l:index]] = string(l:index + 1)
-      endif
-    endfor
-  endif
-
-  " Keep the selector API unchanged while passing defaults to the built-in
-  " selector through script-local context.
-  let s:select_column_defaults = l:defaults
-  try
-    let l:selected_columns = call(a:selector, [l:columns])
-  finally
-    unlet! s:select_column_defaults
-  endtry
-  if type(l:selected_columns) != type([])
-    return 'Column selector must return a list of column names.'
-  endif
-
-  for l:column in l:selected_columns
-    if index(l:columns, l:column) < 0
-      return 'Column selector returned an unknown column: ' . l:column
-    endif
-  endfor
-
-  let l:metadata = {}
-  for l:column in l:columns
-    let l:first_value = has_key(l:objects[0], l:column)
-          \ ? s:ScalarText(l:objects[0][l:column])
-          \ : ''
-    let l:same_value = v:true
-
-    for l:object in l:objects[1:]
-      let l:value = has_key(l:object, l:column)
-            \ ? s:ScalarText(l:object[l:column])
-            \ : ''
-      if l:value !=# l:first_value
-        let l:same_value = v:false
-        break
-      endif
-    endfor
-
-    if index(l:selected_columns, l:column) >= 0
-      let l:metadata[l:column] = v:false
-    elseif l:same_value
-      let l:metadata[l:column] = l:first_value
-    else
-      return 'Column is not selected and contains different values: ' . l:column
-    endif
-  endfor
-
-  let l:output_objects = [l:metadata]
-  let l:column_orders = [l:columns]
-  for l:object in l:objects
-    let l:selected_object = {}
-    for l:column in l:selected_columns
-      let l:selected_object[l:column] = has_key(l:object, l:column)
-            \ ? l:object[l:column]
-            \ : ''
-    endfor
-    call add(l:output_objects, l:selected_object)
-    call add(l:column_orders, l:selected_columns)
-  endfor
-  let l:json_lines = s:EncodeObjects(l:output_objects, l:column_orders)
-
-  if writefile(l:json_lines, a:output_file) != 0
-    return 'Failed to write the JSON file: ' . a:output_file
-  endif
-
-  return ''
-endfunction
-
-function xlsx_csv#OpenAsJson(file) abort
-  let l:output_file = a:file . '.json'
-  let l:error_msg = xlsx_csv#CreateCsvDotJsonFile(
-        \ a:file,
-        \ l:output_file,
-        \ function('s:SelectColumns'))
-  if !empty(l:error_msg)
-    call xlsx_csv#EchoError(l:error_msg)
-    return
-  endif
-
-  try
-    execute 'edit ' . fnameescape(l:output_file)
-  catch
-    call xlsx_csv#EchoError('Failed to open the file: ' . l:output_file)
-  endtry
 endfunction
