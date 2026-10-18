@@ -22,60 +22,83 @@ function xlsx_csv#ConvertJsonToFormat(json_lines, format) abort
     return {'error': 'Unsupported output format: ' . a:format, 'lines': []}
   endif
 
-  try
-    let l:objects = json_decode(join(a:json_lines, "\n"))
-  catch
-    return {'error': 'Failed to parse JSON input.', 'lines': []}
-  endtry
-
-  if type(l:objects) != type([]) || empty(l:objects)
-    return {'error': 'Expected a non-empty JSON array.', 'lines': []}
+  let l:parsed = s:ParseJsonArray(a:json_lines)
+  if !empty(l:parsed.error)
+    return {'error': l:parsed.error, 'lines': []}
   endif
-  if type(l:objects[0]) != type({})
-    return {'error': 'Expected the first JSON array entry to be an object.',
-          \ 'lines': []}
-  endif
+  let l:objects = l:parsed.objects
 
   let l:columns = s:GetJsonColumns(a:json_lines, l:objects[0])
   if empty(l:columns)
     let l:columns = keys(l:objects[0])
   endif
 
-  let l:normalized = []
   let l:empty_marker = '__xlsx_csv_empty_' .
         \ substitute(tempname(), '[^A-Za-z0-9]', '_', 'g') . '__'
-  for l:object_index in range(1, len(l:objects) - 1)
-    let l:object = l:objects[l:object_index]
+  let l:normalized = s:NormalizeJsonObjects(
+        \ l:objects, l:columns, l:empty_marker)
+  if !empty(l:normalized.error)
+    return {'error': l:normalized.error, 'lines': []}
+  endif
+
+  return s:RunMiller(l:normalized.objects, l:columns, l:empty_marker,
+        \ a:format)
+endfunction
+
+function s:ParseJsonArray(lines) abort
+  try
+    let l:objects = json_decode(join(a:lines, "\n"))
+  catch
+    return {'error': 'Failed to parse JSON input.', 'objects': []}
+  endtry
+
+  if type(l:objects) != type([]) || empty(l:objects)
+    return {'error': 'Expected a non-empty JSON array.', 'objects': []}
+  endif
+  if type(l:objects[0]) != type({})
+    return {'error': 'Expected the first JSON array entry to be an object.',
+          \ 'objects': []}
+  endif
+  return {'error': '', 'objects': l:objects}
+endfunction
+
+function s:NormalizeJsonObjects(objects, columns, empty_marker) abort
+  let l:normalized = []
+  for l:object_index in range(1, len(a:objects) - 1)
+    let l:object = a:objects[l:object_index]
     if type(l:object) != type({})
       return {'error': printf('JSON entry %d is not an object.',
-            \ l:object_index), 'lines': []}
+            \ l:object_index), 'objects': []}
     endif
 
     for l:field in keys(l:object)
-      if index(l:columns, l:field) < 0
+      if index(a:columns, l:field) < 0
         return {'error': printf(
               \ 'JSON entry %d contains an unknown field: %s',
-              \ l:object_index, l:field), 'lines': []}
+              \ l:object_index, l:field), 'objects': []}
       endif
     endfor
 
     let l:normalized_object = {}
-    for l:column in l:columns
+    for l:column in a:columns
       let l:normalized_object[l:column] = has_key(l:object, l:column)
             \ ? l:object[l:column]
-            \ : l:objects[0][l:column] is# v:false
+            \ : a:objects[0][l:column] is# v:false
             \   ? ''
-            \   : l:objects[0][l:column]
+            \   : a:objects[0][l:column]
       if type(l:normalized_object[l:column]) == type('')
             \ && empty(l:normalized_object[l:column])
-        let l:normalized_object[l:column] = l:empty_marker
+        let l:normalized_object[l:column] = a:empty_marker
       endif
     endfor
     call add(l:normalized, l:normalized_object)
   endfor
+  return {'error': '', 'objects': l:normalized}
+endfunction
 
+function s:RunMiller(objects, columns, empty_marker, format) abort
   let l:json_lines = s:EncodeObjects(
-        \ l:normalized, repeat([l:columns], len(l:normalized)))
+        \ a:objects, repeat([a:columns], len(a:objects)))
   let l:input_file = tempname()
   try
     if writefile(l:json_lines, l:input_file) != 0
@@ -89,14 +112,19 @@ function xlsx_csv#ConvertJsonToFormat(json_lines, format) abort
             \ . ': ' . join(l:format_lines, ' '), 'lines': []}
     endif
 
-    for l:index in range(0, len(l:format_lines) - 1)
-      let l:format_lines[l:index] = substitute(l:format_lines[l:index],
-            \ l:empty_marker, '', 'g')
-    endfor
-    return {'error': '', 'lines': l:format_lines}
+    return {'error': '', 'lines': s:RemoveEmptyMarkers(
+          \ l:format_lines, a:empty_marker)}
   finally
     call delete(l:input_file)
   endtry
+endfunction
+
+function s:RemoveEmptyMarkers(lines, marker) abort
+  let l:result = copy(a:lines)
+  for l:index in range(0, len(l:result) - 1)
+    let l:result[l:index] = substitute(l:result[l:index], a:marker, '', 'g')
+  endfor
+  return l:result
 endfunction
 
 function s:CompareColumnRanks(left, right) abort
