@@ -46,12 +46,31 @@ function xlsx_csv#ConvertJsonToFormat(json_lines, format) abort
 endfunction
 
 function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
+  function! ReadJsonObjects(file) abort
+    let l:json_lines = readfile(a:file)
+    try
+      let l:objects = json_decode(join(l:json_lines, "\n"))
+    catch
+      return {'error': 'Failed to parse the JSON file: ' . a:file}
+    endtry
+
+    if type(l:objects) != type([]) || empty(l:objects)
+      return {'error': '', 'objects': l:objects, 'columns': []}
+    endif
+    if type(l:objects[0]) != type({})
+      return {'error': 'Expected JSON objects in the file: ' . a:file}
+    endif
+
+    return {'error': '', 'objects': l:objects,
+          \ 'columns': s:GetJsonColumns(l:json_lines, l:objects[0])}
+  endfunction
+
   let l:error_msg = xlsx_csv#ConvertToJson(a:input_file, a:output_file)
   if !empty(l:error_msg)
     return l:error_msg
   endif
 
-  let l:parsed = s:ReadJsonObjects(a:output_file)
+  let l:parsed = ReadJsonObjects(a:output_file)
   if !empty(l:parsed.error)
     return l:parsed.error
   endif
@@ -130,25 +149,6 @@ function xlsx_csv#ConvertToJson(input_file, output_file) abort
 endfunction
 
 "local functions
-function s:ReadJsonObjects(file) abort
-  let l:json_lines = readfile(a:file)
-  try
-    let l:objects = json_decode(join(l:json_lines, "\n"))
-  catch
-    return {'error': 'Failed to parse the JSON file: ' . a:file}
-  endtry
-
-  if type(l:objects) != type([]) || empty(l:objects)
-    return {'error': '', 'objects': l:objects, 'columns': []}
-  endif
-  if type(l:objects[0]) != type({})
-    return {'error': 'Expected JSON objects in the file: ' . a:file}
-  endif
-
-  return {'error': '', 'objects': l:objects,
-        \ 'columns': s:GetJsonColumns(l:json_lines, l:objects[0])}
-endfunction
-
 function s:SelectJsonColumns(objects, columns, selector) abort
   let l:defaults = {}
   if !empty(a:objects)
