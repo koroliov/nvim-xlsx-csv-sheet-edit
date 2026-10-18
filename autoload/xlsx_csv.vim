@@ -65,6 +65,39 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
           \ 'columns': s:GetJsonColumns(l:json_lines, l:objects[0])}
   endfunction
 
+  function! SelectJsonColumns(objects, columns, selector) abort
+    let l:defaults = {}
+    if !empty(a:objects)
+      for l:index in range(0, len(a:columns) - 1)
+        if s:NeedsColumnSelection(a:objects, a:columns[l:index])
+          " Use the human-facing column number as the initial rank.
+          let l:defaults[a:columns[l:index]] = string(l:index + 1)
+        endif
+      endfor
+    endif
+
+    " Keep the selector API unchanged while passing defaults to the built-in
+    " selector through script-local context.
+    let s:select_column_defaults = l:defaults
+    try
+      let l:selected_columns = call(a:selector, [a:columns])
+    finally
+      unlet! s:select_column_defaults
+    endtry
+
+    if type(l:selected_columns) != type([])
+      return {'error': 'Column selector must return a list of column names.'}
+    endif
+
+    for l:column in l:selected_columns
+      if index(a:columns, l:column) < 0
+        return {'error': 'Column selector returned an unknown column: ' . l:column}
+      endif
+    endfor
+
+    return {'error': '', 'columns': l:selected_columns}
+  endfunction
+
   let l:error_msg = xlsx_csv#ConvertToJson(a:input_file, a:output_file)
   if !empty(l:error_msg)
     return l:error_msg
@@ -75,7 +108,7 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
     return l:parsed.error
   endif
 
-  let l:selected = s:SelectJsonColumns(
+  let l:selected = SelectJsonColumns(
         \ l:parsed.objects, l:parsed.columns, a:selector)
   if !empty(l:selected.error)
     return l:selected.error
@@ -149,39 +182,6 @@ function xlsx_csv#ConvertToJson(input_file, output_file) abort
 endfunction
 
 "local functions
-function s:SelectJsonColumns(objects, columns, selector) abort
-  let l:defaults = {}
-  if !empty(a:objects)
-    for l:index in range(0, len(a:columns) - 1)
-      if s:NeedsColumnSelection(a:objects, a:columns[l:index])
-        " Use the human-facing column number as the initial rank.
-        let l:defaults[a:columns[l:index]] = string(l:index + 1)
-      endif
-    endfor
-  endif
-
-  " Keep the selector API unchanged while passing defaults to the built-in
-  " selector through script-local context.
-  let s:select_column_defaults = l:defaults
-  try
-    let l:selected_columns = call(a:selector, [a:columns])
-  finally
-    unlet! s:select_column_defaults
-  endtry
-
-  if type(l:selected_columns) != type([])
-    return {'error': 'Column selector must return a list of column names.'}
-  endif
-
-  for l:column in l:selected_columns
-    if index(a:columns, l:column) < 0
-      return {'error': 'Column selector returned an unknown column: ' . l:column}
-    endif
-  endfor
-
-  return {'error': '', 'columns': l:selected_columns}
-endfunction
-
 function s:BuildMetadata(objects, columns, selected_columns) abort
   let l:metadata = {}
   for l:column in a:columns
