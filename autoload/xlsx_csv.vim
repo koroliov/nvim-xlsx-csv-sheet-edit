@@ -98,6 +98,37 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
     return {'error': '', 'columns': l:selected_columns}
   endfunction
 
+  function BuildMetadata(objects, columns, selected_columns) abort
+    let l:metadata = {}
+    for l:column in a:columns
+      let l:first_value = has_key(a:objects[0], l:column)
+            \ ? s:ScalarText(a:objects[0][l:column])
+            \ : ''
+      let l:same_value = v:true
+
+      for l:object in a:objects[1:]
+        let l:value = has_key(l:object, l:column)
+              \ ? s:ScalarText(l:object[l:column])
+              \ : ''
+        if l:value !=# l:first_value
+          let l:same_value = v:false
+          break
+        endif
+      endfor
+
+      if index(a:selected_columns, l:column) >= 0
+        let l:metadata[l:column] = v:false
+      elseif l:same_value
+        let l:metadata[l:column] = l:first_value
+      else
+        return {'error': 'Column is not selected and contains different values: '
+              \ . l:column}
+      endif
+    endfor
+
+    return {'error': '', 'object': l:metadata}
+  endfunction
+
   let l:error_msg = xlsx_csv#ConvertToJson(a:input_file, a:output_file)
   if !empty(l:error_msg)
     return l:error_msg
@@ -114,7 +145,7 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
     return l:selected.error
   endif
 
-  let l:metadata = s:BuildMetadata(
+  let l:metadata = BuildMetadata(
         \ l:parsed.objects, l:parsed.columns, l:selected.columns)
   if !empty(l:metadata.error)
     return l:metadata.error
@@ -182,37 +213,6 @@ function xlsx_csv#ConvertToJson(input_file, output_file) abort
 endfunction
 
 "local functions
-function s:BuildMetadata(objects, columns, selected_columns) abort
-  let l:metadata = {}
-  for l:column in a:columns
-    let l:first_value = has_key(a:objects[0], l:column)
-          \ ? s:ScalarText(a:objects[0][l:column])
-          \ : ''
-    let l:same_value = v:true
-
-    for l:object in a:objects[1:]
-      let l:value = has_key(l:object, l:column)
-            \ ? s:ScalarText(l:object[l:column])
-            \ : ''
-      if l:value !=# l:first_value
-        let l:same_value = v:false
-        break
-      endif
-    endfor
-
-    if index(a:selected_columns, l:column) >= 0
-      let l:metadata[l:column] = v:false
-    elseif l:same_value
-      let l:metadata[l:column] = l:first_value
-    else
-      return {'error': 'Column is not selected and contains different values: '
-            \ . l:column}
-    endif
-  endfor
-
-  return {'error': '', 'object': l:metadata}
-endfunction
-
 function s:BuildSelectedObjects(objects, columns, selected_columns, metadata) abort
   let l:output_objects = [a:metadata]
   let l:column_orders = [a:columns]
