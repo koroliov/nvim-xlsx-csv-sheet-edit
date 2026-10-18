@@ -51,88 +51,27 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
     return l:error_msg
   endif
 
-  let l:json_lines = readfile(a:output_file)
-  try
-    let l:objects = json_decode(join(l:json_lines, "\n"))
-  catch
-    return 'Failed to parse the JSON file: ' . a:output_file
-  endtry
-
-  if type(l:objects) != type([]) || empty(l:objects)
-    let l:columns = []
-  elseif type(l:objects[0]) != type({})
-    return 'Expected JSON objects in the file: ' . a:output_file
-  else
-    let l:columns = s:GetJsonColumns(l:json_lines, l:objects[0])
+  let l:parsed = s:ReadJsonObjects(a:output_file)
+  if !empty(l:parsed.error)
+    return l:parsed.error
   endif
 
-  let l:defaults = {}
-  if !empty(l:objects)
-    for l:index in range(0, len(l:columns) - 1)
-      if s:NeedsColumnSelection(l:objects, l:columns[l:index])
-        " Use the human-facing column number as the initial rank.
-        let l:defaults[l:columns[l:index]] = string(l:index + 1)
-      endif
-    endfor
+  let l:selected = s:SelectJsonColumns(
+        \ l:parsed.objects, l:parsed.columns, a:selector)
+  if !empty(l:selected.error)
+    return l:selected.error
   endif
 
-  " Keep the selector API unchanged while passing defaults to the built-in
-  " selector through script-local context.
-  let s:select_column_defaults = l:defaults
-  try
-    let l:selected_columns = call(a:selector, [l:columns])
-  finally
-    unlet! s:select_column_defaults
-  endtry
-  if type(l:selected_columns) != type([])
-    return 'Column selector must return a list of column names.'
+  let l:metadata = s:BuildMetadata(
+        \ l:parsed.objects, l:parsed.columns, l:selected.columns)
+  if !empty(l:metadata.error)
+    return l:metadata.error
   endif
 
-  for l:column in l:selected_columns
-    if index(l:columns, l:column) < 0
-      return 'Column selector returned an unknown column: ' . l:column
-    endif
-  endfor
-
-  let l:metadata = {}
-  for l:column in l:columns
-    let l:first_value = has_key(l:objects[0], l:column)
-          \ ? s:ScalarText(l:objects[0][l:column])
-          \ : ''
-    let l:same_value = v:true
-
-    for l:object in l:objects[1:]
-      let l:value = has_key(l:object, l:column)
-            \ ? s:ScalarText(l:object[l:column])
-            \ : ''
-      if l:value !=# l:first_value
-        let l:same_value = v:false
-        break
-      endif
-    endfor
-
-    if index(l:selected_columns, l:column) >= 0
-      let l:metadata[l:column] = v:false
-    elseif l:same_value
-      let l:metadata[l:column] = l:first_value
-    else
-      return 'Column is not selected and contains different values: ' . l:column
-    endif
-  endfor
-
-  let l:output_objects = [l:metadata]
-  let l:column_orders = [l:columns]
-  for l:object in l:objects
-    let l:selected_object = {}
-    for l:column in l:selected_columns
-      let l:selected_object[l:column] = has_key(l:object, l:column)
-            \ ? l:object[l:column]
-            \ : ''
-    endfor
-    call add(l:output_objects, l:selected_object)
-    call add(l:column_orders, l:selected_columns)
-  endfor
-  let l:json_lines = s:EncodeObjects(l:output_objects, l:column_orders)
+  let l:output = s:BuildSelectedObjects(
+        \ l:parsed.objects, l:parsed.columns, l:selected.columns,
+        \ l:metadata.object)
+  let l:json_lines = s:EncodeObjects(l:output.objects, l:output.column_orders)
 
   if writefile(l:json_lines, a:output_file) != 0
     return 'Failed to write the JSON file: ' . a:output_file
@@ -191,6 +130,106 @@ function xlsx_csv#ConvertToJson(input_file, output_file) abort
 endfunction
 
 "local functions
+function s:ReadJsonObjects(file) abort
+  let l:json_lines = readfile(a:file)
+  try
+    let l:objects = json_decode(join(l:json_lines, "\n"))
+  catch
+    return {'error': 'Failed to parse the JSON file: ' . a:file}
+  endtry
+
+  if type(l:objects) != type([]) || empty(l:objects)
+    return {'error': '', 'objects': l:objects, 'columns': []}
+  endif
+  if type(l:objects[0]) != type({})
+    return {'error': 'Expected JSON objects in the file: ' . a:file}
+  endif
+
+  return {'error': '', 'objects': l:objects,
+        \ 'columns': s:GetJsonColumns(l:json_lines, l:objects[0])}
+endfunction
+
+function s:SelectJsonColumns(objects, columns, selector) abort
+  let l:defaults = {}
+  if !empty(a:objects)
+    for l:index in range(0, len(a:columns) - 1)
+      if s:NeedsColumnSelection(a:objects, a:columns[l:index])
+        " Use the human-facing column number as the initial rank.
+        let l:defaults[a:columns[l:index]] = string(l:index + 1)
+      endif
+    endfor
+  endif
+
+  " Keep the selector API unchanged while passing defaults to the built-in
+  " selector through script-local context.
+  let s:select_column_defaults = l:defaults
+  try
+    let l:selected_columns = call(a:selector, [a:columns])
+  finally
+    unlet! s:select_column_defaults
+  endtry
+
+  if type(l:selected_columns) != type([])
+    return {'error': 'Column selector must return a list of column names.'}
+  endif
+
+  for l:column in l:selected_columns
+    if index(a:columns, l:column) < 0
+      return {'error': 'Column selector returned an unknown column: ' . l:column}
+    endif
+  endfor
+
+  return {'error': '', 'columns': l:selected_columns}
+endfunction
+
+function s:BuildMetadata(objects, columns, selected_columns) abort
+  let l:metadata = {}
+  for l:column in a:columns
+    let l:first_value = has_key(a:objects[0], l:column)
+          \ ? s:ScalarText(a:objects[0][l:column])
+          \ : ''
+    let l:same_value = v:true
+
+    for l:object in a:objects[1:]
+      let l:value = has_key(l:object, l:column)
+            \ ? s:ScalarText(l:object[l:column])
+            \ : ''
+      if l:value !=# l:first_value
+        let l:same_value = v:false
+        break
+      endif
+    endfor
+
+    if index(a:selected_columns, l:column) >= 0
+      let l:metadata[l:column] = v:false
+    elseif l:same_value
+      let l:metadata[l:column] = l:first_value
+    else
+      return {'error': 'Column is not selected and contains different values: '
+            \ . l:column}
+    endif
+  endfor
+
+  return {'error': '', 'object': l:metadata}
+endfunction
+
+function s:BuildSelectedObjects(objects, columns, selected_columns, metadata) abort
+  let l:output_objects = [a:metadata]
+  let l:column_orders = [a:columns]
+  for l:object in a:objects
+    let l:selected_object = {}
+    for l:column in a:selected_columns
+      let l:selected_object[l:column] = has_key(l:object, l:column)
+            \ ? l:object[l:column]
+            \ : ''
+    endfor
+    call add(l:output_objects, l:selected_object)
+    call add(l:column_orders, a:selected_columns)
+  endfor
+
+  return {'objects': l:output_objects, 'column_orders': l:column_orders}
+endfunction
+
 function s:ParseJsonArray(lines) abort
   try
     let l:objects = json_decode(join(a:lines, "\n"))
