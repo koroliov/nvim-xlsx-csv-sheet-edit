@@ -18,11 +18,93 @@ function xlsx_csv#CopyAsFormat(format) abort
 endfunction
 
 function xlsx_csv#ConvertJsonToFormat(json_lines, format) abort
+  function! ParseJsonArray(lines) abort
+    try
+      let l:objects = json_decode(join(a:lines, "\n"))
+    catch
+      return {'error': 'Failed to parse JSON input.', 'objects': []}
+    endtry
+
+    if type(l:objects) != type([]) || empty(l:objects)
+      return {'error': 'Expected a non-empty JSON array.', 'objects': []}
+    endif
+    if type(l:objects[0]) != type({})
+      return {'error': 'Expected the first JSON array entry to be an object.',
+            \ 'objects': []}
+    endif
+    return {'error': '', 'objects': l:objects}
+  endfunction
+
+  function! NormalizeJsonObjects(objects, columns, empty_marker) abort
+    let l:normalized = []
+    for l:object_index in range(1, len(a:objects) - 1)
+      let l:object = a:objects[l:object_index]
+      if type(l:object) != type({})
+        return {'error': printf('JSON entry %d is not an object.',
+              \ l:object_index), 'objects': []}
+      endif
+
+      for l:field in keys(l:object)
+        if index(a:columns, l:field) < 0
+          return {'error': printf(
+                \ 'JSON entry %d contains an unknown field: %s',
+                \ l:object_index, l:field), 'objects': []}
+        endif
+      endfor
+
+      let l:normalized_object = {}
+      for l:column in a:columns
+        let l:normalized_object[l:column] = has_key(l:object, l:column)
+              \ ? l:object[l:column]
+              \ : a:objects[0][l:column] is# v:false
+              \   ? ''
+              \   : a:objects[0][l:column]
+        if type(l:normalized_object[l:column]) == type('')
+              \ && empty(l:normalized_object[l:column])
+          let l:normalized_object[l:column] = a:empty_marker
+        endif
+      endfor
+      call add(l:normalized, l:normalized_object)
+    endfor
+    return {'error': '', 'objects': l:normalized}
+  endfunction
+
+  function! RunMiller(objects, columns, empty_marker, format) abort
+    function! RemoveEmptyMarkers(lines, marker) abort
+      let l:result = copy(a:lines)
+      for l:index in range(0, len(l:result) - 1)
+        let l:result[l:index] = substitute(l:result[l:index], a:marker, '', 'g')
+      endfor
+      return l:result
+    endfunction
+
+    let l:json_lines = s:EncodeObjects(
+          \ a:objects, repeat([a:columns], len(a:objects)))
+    let l:input_file = tempname()
+    try
+      if writefile(l:json_lines, l:input_file) != 0
+        return {'error': 'Failed to prepare JSON for conversion.', 'lines': []}
+      endif
+
+      let l:format_lines = systemlist([
+            \ 'mlr', '--ijson', '--o' . a:format, 'cat', l:input_file])
+      if v:shell_error != 0
+        return {'error': 'Miller failed to convert JSON to ' . toupper(a:format)
+              \ . ': ' . join(l:format_lines, ' '), 'lines': []}
+      endif
+
+      return {'error': '', 'lines': RemoveEmptyMarkers(
+            \ l:format_lines, a:empty_marker)}
+    finally
+      call delete(l:input_file)
+    endtry
+  endfunction
+
   if a:format !~# '^\%(csv\|tsv\)$'
     return {'error': 'Unsupported output format: ' . a:format, 'lines': []}
   endif
 
-  let l:parsed = s:ParseJsonArray(a:json_lines)
+  let l:parsed = ParseJsonArray(a:json_lines)
   if !empty(l:parsed.error)
     return {'error': l:parsed.error, 'lines': []}
   endif
@@ -35,13 +117,13 @@ function xlsx_csv#ConvertJsonToFormat(json_lines, format) abort
 
   let l:empty_marker = '__xlsx_csv_empty_' .
         \ substitute(tempname(), '[^A-Za-z0-9]', '_', 'g') . '__'
-  let l:normalized = s:NormalizeJsonObjects(
+  let l:normalized = NormalizeJsonObjects(
         \ l:objects, l:columns, l:empty_marker)
   if !empty(l:normalized.error)
     return {'error': l:normalized.error, 'lines': []}
   endif
 
-  return s:RunMiller(l:normalized.objects, l:columns, l:empty_marker,
+  return RunMiller(l:normalized.objects, l:columns, l:empty_marker,
         \ a:format)
 endfunction
 
@@ -98,7 +180,7 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
     return {'error': '', 'columns': l:selected_columns}
   endfunction
 
-  function BuildMetadata(objects, columns, selected_columns) abort
+  function! BuildMetadata(objects, columns, selected_columns) abort
     let l:metadata = {}
     for l:column in a:columns
       let l:first_value = has_key(a:objects[0], l:column)
@@ -129,6 +211,23 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
     return {'error': '', 'object': l:metadata}
   endfunction
 
+  function! BuildSelectedObjects(objects, columns, selected_columns, metadata) abort
+    let l:output_objects = [a:metadata]
+    let l:column_orders = [a:columns]
+    for l:object in a:objects
+      let l:selected_object = {}
+      for l:column in a:selected_columns
+        let l:selected_object[l:column] = has_key(l:object, l:column)
+              \ ? l:object[l:column]
+              \ : ''
+      endfor
+      call add(l:output_objects, l:selected_object)
+      call add(l:column_orders, a:selected_columns)
+    endfor
+
+    return {'objects': l:output_objects, 'column_orders': l:column_orders}
+  endfunction
+
   let l:error_msg = xlsx_csv#ConvertToJson(a:input_file, a:output_file)
   if !empty(l:error_msg)
     return l:error_msg
@@ -151,7 +250,7 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
     return l:metadata.error
   endif
 
-  let l:output = s:BuildSelectedObjects(
+  let l:output = BuildSelectedObjects(
         \ l:parsed.objects, l:parsed.columns, l:selected.columns,
         \ l:metadata.object)
   let l:json_lines = s:EncodeObjects(l:output.objects, l:output.column_orders)
@@ -213,104 +312,6 @@ function xlsx_csv#ConvertToJson(input_file, output_file) abort
 endfunction
 
 "local functions
-function s:BuildSelectedObjects(objects, columns, selected_columns, metadata) abort
-  let l:output_objects = [a:metadata]
-  let l:column_orders = [a:columns]
-  for l:object in a:objects
-    let l:selected_object = {}
-    for l:column in a:selected_columns
-      let l:selected_object[l:column] = has_key(l:object, l:column)
-            \ ? l:object[l:column]
-            \ : ''
-    endfor
-    call add(l:output_objects, l:selected_object)
-    call add(l:column_orders, a:selected_columns)
-  endfor
-
-  return {'objects': l:output_objects, 'column_orders': l:column_orders}
-endfunction
-
-function s:ParseJsonArray(lines) abort
-  try
-    let l:objects = json_decode(join(a:lines, "\n"))
-  catch
-    return {'error': 'Failed to parse JSON input.', 'objects': []}
-  endtry
-
-  if type(l:objects) != type([]) || empty(l:objects)
-    return {'error': 'Expected a non-empty JSON array.', 'objects': []}
-  endif
-  if type(l:objects[0]) != type({})
-    return {'error': 'Expected the first JSON array entry to be an object.',
-          \ 'objects': []}
-  endif
-  return {'error': '', 'objects': l:objects}
-endfunction
-
-function s:NormalizeJsonObjects(objects, columns, empty_marker) abort
-  let l:normalized = []
-  for l:object_index in range(1, len(a:objects) - 1)
-    let l:object = a:objects[l:object_index]
-    if type(l:object) != type({})
-      return {'error': printf('JSON entry %d is not an object.',
-            \ l:object_index), 'objects': []}
-    endif
-
-    for l:field in keys(l:object)
-      if index(a:columns, l:field) < 0
-        return {'error': printf(
-              \ 'JSON entry %d contains an unknown field: %s',
-              \ l:object_index, l:field), 'objects': []}
-      endif
-    endfor
-
-    let l:normalized_object = {}
-    for l:column in a:columns
-      let l:normalized_object[l:column] = has_key(l:object, l:column)
-            \ ? l:object[l:column]
-            \ : a:objects[0][l:column] is# v:false
-            \   ? ''
-            \   : a:objects[0][l:column]
-      if type(l:normalized_object[l:column]) == type('')
-            \ && empty(l:normalized_object[l:column])
-        let l:normalized_object[l:column] = a:empty_marker
-      endif
-    endfor
-    call add(l:normalized, l:normalized_object)
-  endfor
-  return {'error': '', 'objects': l:normalized}
-endfunction
-
-function s:RunMiller(objects, columns, empty_marker, format) abort
-  let l:json_lines = s:EncodeObjects(
-        \ a:objects, repeat([a:columns], len(a:objects)))
-  let l:input_file = tempname()
-  try
-    if writefile(l:json_lines, l:input_file) != 0
-      return {'error': 'Failed to prepare JSON for conversion.', 'lines': []}
-    endif
-
-    let l:format_lines = systemlist([
-          \ 'mlr', '--ijson', '--o' . a:format, 'cat', l:input_file])
-    if v:shell_error != 0
-      return {'error': 'Miller failed to convert JSON to ' . toupper(a:format)
-            \ . ': ' . join(l:format_lines, ' '), 'lines': []}
-    endif
-
-    return {'error': '', 'lines': s:RemoveEmptyMarkers(
-          \ l:format_lines, a:empty_marker)}
-  finally
-    call delete(l:input_file)
-  endtry
-endfunction
-
-function s:RemoveEmptyMarkers(lines, marker) abort
-  let l:result = copy(a:lines)
-  for l:index in range(0, len(l:result) - 1)
-    let l:result[l:index] = substitute(l:result[l:index], a:marker, '', 'g')
-  endfor
-  return l:result
-endfunction
 
 function s:CompareColumnRanks(left, right) abort
   let l:left_rank = str2nr(a:left[0])
