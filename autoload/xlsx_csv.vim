@@ -42,6 +42,8 @@ function xlsx_csv#ConvertJsonToFormat(json_lines, format) abort
   endif
 
   let l:normalized = []
+  let l:empty_marker = '__xlsx_csv_empty_' .
+        \ substitute(tempname(), '[^A-Za-z0-9]', '_', 'g') . '__'
   for l:object_index in range(1, len(l:objects) - 1)
     let l:object = l:objects[l:object_index]
     if type(l:object) != type({})
@@ -61,7 +63,13 @@ function xlsx_csv#ConvertJsonToFormat(json_lines, format) abort
     for l:column in l:columns
       let l:normalized_object[l:column] = has_key(l:object, l:column)
             \ ? l:object[l:column]
-            \ : l:objects[0][l:column]
+            \ : l:objects[0][l:column] is# v:false
+            \   ? ''
+            \   : l:objects[0][l:column]
+      if type(l:normalized_object[l:column]) == type('')
+            \ && empty(l:normalized_object[l:column])
+        let l:normalized_object[l:column] = l:empty_marker
+      endif
     endfor
     call add(l:normalized, l:normalized_object)
   endfor
@@ -81,6 +89,10 @@ function xlsx_csv#ConvertJsonToFormat(json_lines, format) abort
             \ . ': ' . join(l:format_lines, ' '), 'lines': []}
     endif
 
+    for l:index in range(0, len(l:format_lines) - 1)
+      let l:format_lines[l:index] = substitute(l:format_lines[l:index],
+            \ l:empty_marker, '', 'g')
+    endfor
     return {'error': '', 'lines': l:format_lines}
   finally
     call delete(l:input_file)
