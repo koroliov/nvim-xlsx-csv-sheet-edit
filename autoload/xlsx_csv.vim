@@ -247,7 +247,38 @@ function xlsx_csv#CreateCsvDotJsonFile(input_file, output_file, selector) abort
     return {'objects': l:output_objects, 'column_orders': l:column_orders}
   endfunction
 
-  let l:error_msg = xlsx_csv#ConvertToJson(a:input_file, a:output_file)
+  function! ConvertToJson(input_file, output_file) abort
+    if !filereadable(a:input_file)
+      return 'Failed to open the file: ' . a:input_file
+    endif
+
+    let l:error_file = tempname()
+    let l:command = 'mlr --icsv --ojson cat ' . shellescape(a:input_file)
+          \ . ' > ' . shellescape(a:output_file)
+          \ . ' 2> ' . shellescape(l:error_file)
+
+    try
+      call system(l:command)
+      let l:exit_code = v:shell_error
+      let l:error_lines = filereadable(l:error_file)
+            \ ? readfile(l:error_file)
+            \ : []
+
+      if l:exit_code != 0
+        let l:details = join(l:error_lines, ' ')
+        if empty(l:details)
+          let l:details = 'Miller exited with status ' . l:exit_code
+        endif
+        return 'Miller failed for ' . a:input_file . ': ' . l:details
+      endif
+
+      return ''
+    finally
+      call delete(l:error_file)
+    endtry
+  endfunction
+
+  let l:error_msg = ConvertToJson(a:input_file, a:output_file)
   if !empty(l:error_msg)
     return l:error_msg
   endif
@@ -442,37 +473,6 @@ function xlsx_csv#OpenAsJson(file) abort
     execute 'edit ' . fnameescape(l:output_file)
   catch
     call xlsx_csv#EchoError('Failed to open the file: ' . l:output_file)
-  endtry
-endfunction
-
-function xlsx_csv#ConvertToJson(input_file, output_file) abort
-  if !filereadable(a:input_file)
-    return 'Failed to open the file: ' . a:input_file
-  endif
-
-  let l:error_file = tempname()
-  let l:command = 'mlr --icsv --ojson cat ' . shellescape(a:input_file)
-        \ . ' > ' . shellescape(a:output_file)
-        \ . ' 2> ' . shellescape(l:error_file)
-
-  try
-    call system(l:command)
-    let l:exit_code = v:shell_error
-    let l:error_lines = filereadable(l:error_file)
-          \ ? readfile(l:error_file)
-          \ : []
-
-    if l:exit_code != 0
-      let l:details = join(l:error_lines, ' ')
-      if empty(l:details)
-        let l:details = 'Miller exited with status ' . l:exit_code
-      endif
-      return 'Miller failed for ' . a:input_file . ': ' . l:details
-    endif
-
-    return ''
-  finally
-    call delete(l:error_file)
   endtry
 endfunction
 
