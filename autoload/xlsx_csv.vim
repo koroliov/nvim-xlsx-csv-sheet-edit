@@ -324,6 +324,45 @@ function s:CompareColumnRanks(left, right) abort
 endfunction
 
 function s:SelectColumns(columns) abort
+  let l:state = {'order': s:InitialColumnOrder(a:columns),
+        \ 'current': 0, 'offset': 0}
+  let l:buffer = nvim_create_buf(v:false, v:true)
+  let l:dimensions = s:ColumnSelectorDimensions(a:columns)
+  let l:window = s:OpenColumnSelectorWindow(l:buffer, l:dimensions)
+  let l:namespace = nvim_create_namespace('xlsx_csv_select_mark_columns')
+
+  while 1
+    call s:RenderColumnSelector(l:buffer, l:namespace, a:columns,
+          \ l:state, l:dimensions.visible_items)
+
+    let l:key = getcharstr()
+    if !s:HandleColumnSelectorKey(l:key, l:state, len(a:columns),
+          \ l:dimensions.visible_items)
+      break
+    endif
+  endwhile
+
+  call nvim_win_close(l:window, v:true)
+  if nvim_buf_is_valid(l:buffer)
+    call nvim_buf_delete(l:buffer, {'force': v:true})
+  endif
+
+  let l:ranked = []
+  for l:index in range(0, len(l:state.order) - 1)
+    if !empty(l:state.order[l:index])
+      call add(l:ranked, [l:state.order[l:index], l:index])
+    endif
+  endfor
+  call sort(l:ranked, function('s:CompareColumnRanks'))
+
+  let l:result = []
+  for l:item in l:ranked
+    call add(l:result, a:columns[l:item[1]])
+  endfor
+  return l:result
+endfunction
+
+function s:InitialColumnOrder(columns) abort
   " An empty string means that a column is not selected.  Otherwise the
   " value is a string containing only non-negative integer digits.
   let l:order = repeat([''], len(a:columns))
@@ -334,9 +373,11 @@ function s:SelectColumns(columns) abort
       let l:order[l:index] = s:select_column_defaults[l:column]
     endif
   endfor
-  let l:buffer = nvim_create_buf(v:false, v:true)
-  let l:desired_width = 0
+  return l:order
+endfunction
 
+function s:ColumnSelectorDimensions(columns) abort
+  let l:desired_width = 0
   for l:column in a:columns
     let l:desired_width = max([l:desired_width, strdisplaywidth(l:column)])
   endfor
@@ -344,90 +385,77 @@ function s:SelectColumns(columns) abort
         \ strdisplaywidth('Select and order columns'),
         \ strdisplaywidth('Up/Down: move  0-9: enter rank  BS: delete  Space/c: clear  Enter: accept  q/Esc: cancel')])
 
-  let l:width = min([max([20, l:desired_width + 14]), &columns - 4])
   let l:height = min([len(a:columns) + 3, &lines - 4])
-  let l:visible_items = max([1, l:height - 3])
-  let l:window = nvim_open_win(l:buffer, v:true, {
+  return {'width': min([max([20, l:desired_width + 14]), &columns - 4]),
+        \ 'height': l:height, 'visible_items': max([1, l:height - 3])}
+endfunction
+
+function s:OpenColumnSelectorWindow(buffer, dimensions) abort
+  let l:window = nvim_open_win(a:buffer, v:true, {
         \ 'relative': 'editor',
-        \ 'row': max([0, (&lines - l:height) / 2]),
-        \ 'col': max([0, (&columns - l:width) / 2]),
-        \ 'width': l:width,
-        \ 'height': l:height,
+        \ 'row': max([0, (&lines - a:dimensions.height) / 2]),
+        \ 'col': max([0, (&columns - a:dimensions.width) / 2]),
+        \ 'width': a:dimensions.width,
+        \ 'height': a:dimensions.height,
         \ 'style': 'minimal',
         \ 'border': 'rounded',
         \ })
-  call nvim_buf_set_option(l:buffer, 'buftype', 'nofile')
-  call nvim_buf_set_option(l:buffer, 'bufhidden', 'wipe')
+  call nvim_buf_set_option(a:buffer, 'buftype', 'nofile')
+  call nvim_buf_set_option(a:buffer, 'bufhidden', 'wipe')
   call nvim_win_set_option(l:window, 'wrap', v:true)
   call nvim_win_set_option(l:window, 'linebreak', v:true)
+  return l:window
+endfunction
 
-  let l:namespace = nvim_create_namespace('xlsx_csv_select_mark_columns')
-  let l:current = 0
-  let l:offset = 0
+function s:RenderColumnSelector(buffer, namespace, columns, state, visible_items) abort
+  let l:menu = ['Select and order columns', '']
+  for l:index in range(a:state.offset,
+        \ min([len(a:columns) - 1, a:state.offset + a:visible_items - 1]))
+    let l:rank = empty(a:state.order[l:index]) ? ' ' : a:state.order[l:index]
+    let l:prefix = l:index == a:state.current ? '> ' : '  '
+    call add(l:menu, printf('%s[%3s] %2d. %s', l:prefix, l:rank,
+          \ l:index + 1, a:columns[l:index]))
+  endfor
+  call extend(l:menu, ['',
+        \ 'Up/Down: move  0-9: enter rank  BS: delete  Space/c: clear  Enter: accept  q/Esc: cancel'])
 
-  while 1
-    let l:menu = [
-          \ 'Select and order columns',
-          \ '']
-    for l:index in range(l:offset, min([len(a:columns) - 1, l:offset + l:visible_items - 1]))
-      let l:rank = empty(l:order[l:index]) ? ' ' : l:order[l:index]
-      let l:prefix = l:index == l:current ? '> ' : '  '
-      call add(l:menu, printf('%s[%3s] %2d. %s', l:prefix, l:rank, l:index + 1, a:columns[l:index]))
-    endfor
-    call extend(l:menu, ['', 'Up/Down: move  0-9: enter rank  BS: delete  Space/c: clear  Enter: accept  q/Esc: cancel'])
+  call nvim_buf_set_option(a:buffer, 'modifiable', v:true)
+  call nvim_buf_set_lines(a:buffer, 0, -1, v:true, l:menu)
+  call nvim_buf_set_option(a:buffer, 'modifiable', v:false)
+  call nvim_buf_clear_namespace(a:buffer, a:namespace, 0, -1)
+  call nvim_buf_add_highlight(a:buffer, a:namespace, 'CursorLine',
+        \ 2 + a:state.current - a:state.offset, 0, -1)
+  redraw
+endfunction
 
-    call nvim_buf_set_option(l:buffer, 'modifiable', v:true)
-    call nvim_buf_set_lines(l:buffer, 0, -1, v:true, l:menu)
-    call nvim_buf_set_option(l:buffer, 'modifiable', v:false)
-    call nvim_buf_clear_namespace(l:buffer, l:namespace, 0, -1)
-    call nvim_buf_add_highlight(l:buffer, l:namespace, 'CursorLine', 2 + l:current - l:offset, 0, -1)
-    redraw
-
-    let l:key = getcharstr()
-    if l:key ==# "\<Up>" || l:key ==# 'k'
-      let l:current = max([0, l:current - 1])
-    elseif l:key ==# "\<Down>" || l:key ==# 'j'
-      let l:current = min([len(a:columns) - 1, l:current + 1])
-    elseif l:key =~# '^[0-9]$'
-      let l:order[l:current] .= l:key
-    elseif l:key ==# "\<BS>" || l:key ==# "\<C-H>"
-      if !empty(l:order[l:current])
-        let l:order[l:current] = strpart(l:order[l:current], 0, strlen(l:order[l:current]) - 1)
-      endif
-    elseif l:key ==# ' ' || l:key ==# 'c'
-      let l:order[l:current] = ''
-    elseif l:key ==# "\<CR>"
-      break
-    elseif l:key ==# "\<Esc>" || l:key ==# 'q'
-      let l:order = []
-      break
+function s:HandleColumnSelectorKey(key, state, column_count, visible_items) abort
+  if a:key ==# "\<Up>" || a:key ==# 'k'
+    let a:state.current = max([0, a:state.current - 1])
+  elseif a:key ==# "\<Down>" || a:key ==# 'j'
+    let a:state.current = min([a:column_count - 1, a:state.current + 1])
+  elseif a:key =~# '^[0-9]$'
+    let a:state.order[a:state.current] .= a:key
+  elseif a:key ==# "\<BS>" || a:key ==# "\<C-H>"
+    if !empty(a:state.order[a:state.current])
+      let a:state.order[a:state.current] = strpart(
+            \ a:state.order[a:state.current], 0,
+            \ strlen(a:state.order[a:state.current]) - 1)
     endif
-
-    if l:current < l:offset
-      let l:offset = l:current
-    elseif l:current >= l:offset + l:visible_items
-      let l:offset = l:current - l:visible_items + 1
-    endif
-  endwhile
-
-  call nvim_win_close(l:window, v:true)
-  if nvim_buf_is_valid(l:buffer)
-    call nvim_buf_delete(l:buffer, {'force': v:true})
+  elseif a:key ==# ' ' || a:key ==# 'c'
+    let a:state.order[a:state.current] = ''
+  elseif a:key ==# "\<CR>"
+    return v:false
+  elseif a:key ==# "\<Esc>" || a:key ==# 'q'
+    let a:state.order = []
+    return v:false
   endif
 
-  let l:ranked = []
-  for l:index in range(0, len(l:order) - 1)
-    if !empty(l:order[l:index])
-      call add(l:ranked, [l:order[l:index], l:index])
-    endif
-  endfor
-  call sort(l:ranked, function('s:CompareColumnRanks'))
-
-  let l:result = []
-  for l:item in l:ranked
-    call add(l:result, a:columns[l:item[1]])
-  endfor
-  return l:result
+  if a:state.current < a:state.offset
+    let a:state.offset = a:state.current
+  elseif a:state.current >= a:state.offset + a:visible_items
+    let a:state.offset = a:state.current - a:visible_items + 1
+  endif
+  return v:true
 endfunction
 
 function s:GetJsonColumns(lines, object) abort
