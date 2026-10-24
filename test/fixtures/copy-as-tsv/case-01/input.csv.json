@@ -1,0 +1,18 @@
+[
+  {
+    "name": "Alice",
+    "name_2": false,
+    "age": false,
+    "city": false,
+    "emptyCol": ""
+  },
+  {
+    "name_2": "",
+    "city": "Denver",
+    "age": 30
+  },
+  {
+    "name_2": "Bar",
+    "city": ""
+  }
+]
